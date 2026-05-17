@@ -453,14 +453,15 @@ async function start() {
       console.log('[Crucix] No existing data found — first sweep required');
     }
 
+    //不再拉取数据
     // Run first sweep (refreshes data in background)
-    console.log('[Crucix] Running initial sweep...');
-    runSweepCycle().catch(err => {
-      console.error('[Crucix] Initial sweep failed:', err.message || err);
-    });
+    //console.log('[Crucix] Running initial sweep...');
+    //runSweepCycle().catch(err => {
+    //  console.error('[Crucix] Initial sweep failed:', err.message || err);
+    //});
 
     // Schedule recurring sweeps
-    setInterval(runSweepCycle, config.refreshIntervalMinutes * 60 * 1000);
+    //setInterval(runSweepCycle, config.refreshIntervalMinutes * 60 * 1000);
   });
 }
 
