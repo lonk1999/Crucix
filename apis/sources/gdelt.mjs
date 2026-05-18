@@ -7,6 +7,9 @@ import { safeFetch } from '../utils/fetch.mjs';
 
 const BASE = 'https://api.gdeltproject.org/api/v2';
 
+// GDELT blocks requests without a proper browser User-Agent
+const BROWSER_UA = { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/125.0.0.0 Safari/537.36' };
+
 // Search recent global events/articles by keyword
 export async function searchEvents(query = '', opts = {}) {
   const {
@@ -18,7 +21,8 @@ export async function searchEvents(query = '', opts = {}) {
   } = opts;
 
   // If no query, use broad geopolitical terms
-  const q = query || 'conflict OR crisis OR military OR sanctions OR war OR economy';
+  // NOTE: GDELT requires OR'd terms to be surrounded by parentheses
+  const q = query || '(conflict OR crisis OR military OR sanctions OR war OR economy)';
   const params = new URLSearchParams({
     query: q,
     mode,
@@ -28,7 +32,9 @@ export async function searchEvents(query = '', opts = {}) {
     sort: sortBy,
   });
 
-  return safeFetch(`${BASE}/doc/doc?${params}`);
+  return safeFetch(`${BASE}/doc/doc?${params}`, {
+    headers: BROWSER_UA,
+  });
 }
 
 // Get tone/sentiment timeline for a topic
@@ -39,7 +45,9 @@ export async function toneTrend(query, timespan = '7d') {
     timespan,
     format: 'json',
   });
-  return safeFetch(`${BASE}/doc/doc?${params}`);
+  return safeFetch(`${BASE}/doc/doc?${params}`, {
+    headers: BROWSER_UA,
+  });
 }
 
 // Get volume timeline for a topic (how much coverage)
@@ -50,7 +58,9 @@ export async function volumeTrend(query, timespan = '7d') {
     timespan,
     format: 'json',
   });
-  return safeFetch(`${BASE}/doc/doc?${params}`);
+  return safeFetch(`${BASE}/doc/doc?${params}`, {
+    headers: BROWSER_UA,
+  });
 }
 
 // GEO API — geographic event mapping
@@ -62,7 +72,8 @@ export async function geoEvents(query = '', opts = {}) {
     maxPoints = 500,
   } = opts;
 
-  const q = query || 'conflict OR military OR protest OR explosion';
+  // NOTE: GDELT requires OR'd terms to be surrounded by parentheses
+  const q = query || '(conflict OR military OR protest OR explosion)';
   const params = new URLSearchParams({
     query: q,
     mode,
@@ -71,7 +82,9 @@ export async function geoEvents(query = '', opts = {}) {
     maxpoints: String(maxPoints),
   });
 
-  return safeFetch(`${BASE}/geo/geo?${params}`);
+  return safeFetch(`${BASE}/geo/geo?${params}`, {
+    headers: BROWSER_UA,
+  });
 }
 
 // Compact article for briefing
@@ -92,8 +105,9 @@ function delay(ms) { return new Promise(r => setTimeout(r, ms)); }
 // Briefing mode — get top global events summary (sequential due to rate limit)
 export async function briefing() {
   // Single broad query to stay within rate limits
+  // NOTE: GDELT requires OR'd terms to be surrounded by parentheses
   const all = await searchEvents(
-    'conflict OR military OR economy OR crisis OR war OR sanctions OR tariff OR strike OR outbreak',
+    '(conflict OR military OR economy OR crisis OR war OR sanctions OR tariff OR strike OR outbreak)',
     { maxRecords: 50, timespan: '24h' }
   );
 
@@ -108,7 +122,7 @@ export async function briefing() {
   await delay(5500);
   let geoPoints = [];
   try {
-    const geo = await geoEvents('conflict OR military OR protest OR crisis', { maxPoints: 30, timespan: '24h' });
+    const geo = await geoEvents('(conflict OR military OR protest OR crisis)', { maxPoints: 30, timespan: '24h' });
     geoPoints = (geo?.features || []).filter(f => f.geometry?.coordinates).map(f => ({
       lat: f.geometry.coordinates[1],
       lon: f.geometry.coordinates[0],

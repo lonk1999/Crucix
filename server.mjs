@@ -9,7 +9,8 @@ import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import config from './crucix.config.mjs';
 import { getLocale, currentLanguage, getSupportedLocales } from './lib/i18n.mjs';
-import { fullBriefing } from './apis/briefing.mjs';
+// 导入队列方式 upd by lonk 2026-05-18
+import { stepBriefing } from './apis/briefing.mjs';
 import { synthesize, generateIdeas } from './dashboard/inject.mjs';
 import { MemoryManager } from './lib/delta/index.mjs';
 import { createLLMProvider } from './lib/llm/index.mjs';
@@ -323,8 +324,10 @@ async function runSweepCycle() {
   console.log(`${'='.repeat(60)}`);
 
   try {
-    // 1. Run the full briefing sweep
-    const rawData = await fullBriefing();
+    // 1. Run the step briefing sweep (sequential — lower memory)
+    // 改为队列方式 upd by lonk 2026-05-18
+    // const rawData = await fullBriefing();
+    const rawData = await stepBriefing();
 
     // 2. Save to runs/latest.json
     writeFileSync(join(RUNS_DIR, 'latest.json'), JSON.stringify(rawData, null, 2));
@@ -406,12 +409,12 @@ async function start() {
   ║           CRUCIX INTELLIGENCE ENGINE         ║
   ║          Local Palantir · 26 Sources         ║
   ╠══════════════════════════════════════════════╣
-  ║  Dashboard:  http://localhost:${port}${' '.repeat(14 - String(port).length)}║
-  ║  Health:     http://localhost:${port}/api/health${' '.repeat(4 - String(port).length)}║
-  ║  Refresh:    Every ${config.refreshIntervalMinutes} min${' '.repeat(20 - String(config.refreshIntervalMinutes).length)}║
-  ║  LLM:        ${(config.llm.provider || 'disabled').padEnd(31)}║
-  ║  Telegram:   ${config.telegram.botToken ? 'enabled' : 'disabled'}${' '.repeat(config.telegram.botToken ? 24 : 23)}║
-  ║  Discord:    ${config.discord?.botToken ? 'enabled' : config.discord?.webhookUrl ? 'webhook only' : 'disabled'}${' '.repeat(config.discord?.botToken ? 24 : config.discord?.webhookUrl ? 20 : 23)}║
+  ║   Dashboard: http://localhost:${port}${' '.repeat(14 - String(port).length)} ║
+  ║   Health:    http://localhost:${port}/api/health${' '.repeat(4 - String(port).length)}║
+  ║   Refresh:   Every ${config.refreshIntervalMinutes} min${' '.repeat(20 - String(config.refreshIntervalMinutes).length)}  ║
+  ║   LLM:       ${(config.llm.provider || 'disabled').padEnd(31)} ║
+  ║   Telegram:  ${config.telegram.botToken ? 'enabled' : 'disabled'}${' '.repeat(config.telegram.botToken ? 24 : 23)} ║
+  ║   Discord:   ${config.discord?.botToken ? 'enabled' : config.discord?.webhookUrl ? 'webhook only' : 'disabled'}${' '.repeat(config.discord?.botToken ? 24 : config.discord?.webhookUrl ? 20 : 23)} ║
   ╚══════════════════════════════════════════════╝
   `);
 
@@ -453,15 +456,14 @@ async function start() {
       console.log('[Crucix] No existing data found — first sweep required');
     }
 
-    //不再拉取数据
     // Run first sweep (refreshes data in background)
-    //console.log('[Crucix] Running initial sweep...');
-    //runSweepCycle().catch(err => {
-    //  console.error('[Crucix] Initial sweep failed:', err.message || err);
-    //});
+    console.log('[Crucix] Running initial sweep...');
+    runSweepCycle().catch(err => {
+      console.error('[Crucix] Initial sweep failed:', err.message || err);
+    });
 
     // Schedule recurring sweeps
-    //setInterval(runSweepCycle, config.refreshIntervalMinutes * 60 * 1000);
+    setInterval(runSweepCycle, config.refreshIntervalMinutes * 60 * 1000);
   });
 }
 

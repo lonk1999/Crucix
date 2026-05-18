@@ -47,7 +47,9 @@ import { briefing as yfinance } from './sources/yfinance.mjs';
 import { briefing as cisaKev } from './sources/cisa-kev.mjs';
 import { briefing as cloudflareRadar } from './sources/cloudflare-radar.mjs';
 
-const SOURCE_TIMEOUT_MS = 30_000; // 30s max per individual source
+// GEELT 需要50秒
+// OFAC 需要37秒
+const SOURCE_TIMEOUT_MS = 60_000; // 30s max per individual source
 
 export async function runSource(name, fn, ...args) {
   const start = Date.now();
@@ -66,79 +68,118 @@ export async function runSource(name, fn, ...args) {
   }
 }
 
-export async function fullBriefing() {
-  console.error('[Crucix] Starting intelligence sweep — 29 sources...');
-  const start = Date.now();
-
-  const allPromises = [
+/**
+ * Source task definitions shared between parallel (fullBriefing) and
+ * sequential (stepBriefing) execution modes.
+ * Each entry: { name, fn, args } where fn is the briefing function
+ * and args are any extra arguments (e.g. API key) passed after the fn.
+ */
+function getSourceTasks() {
+  return [
     // Tier 1: Core OSINT & Geopolitical
-    runSource('GDELT', gdelt),
-    runSource('OpenSky', opensky),
-    runSource('FIRMS', firms),
-    runSource('Maritime', ships),
-    runSource('Safecast', safecast),
-    runSource('ACLED', acled),
-    runSource('ReliefWeb', reliefweb),
-    runSource('WHO', who),
-    runSource('OFAC', ofac),
-    runSource('OpenSanctions', opensanctions),
-    runSource('ADS-B', adsb),
+    { name: 'GDELT', fn: gdelt, args: [] },
+    { name: 'OpenSky', fn: opensky, args: [] },
+    { name: 'FIRMS', fn: firms, args: [] },
+    { name: 'Maritime', fn: ships, args: [] },
+    { name: 'Safecast', fn: safecast, args: [] },
+    { name: 'ACLED', fn: acled, args: [] },
+    { name: 'ReliefWeb', fn: reliefweb, args: [] },
+    { name: 'WHO', fn: who, args: [] },
+    { name: 'OFAC', fn: ofac, args: [] },
+    { name: 'OpenSanctions', fn: opensanctions, args: [] },
+    { name: 'ADS-B', fn: adsb, args: [] },
 
     // Tier 2: Economic & Financial
-    runSource('FRED', fred, process.env.FRED_API_KEY),
-    runSource('Treasury', treasury),
-    runSource('BLS', bls, process.env.BLS_API_KEY),
-    runSource('EIA', eia, process.env.EIA_API_KEY),
-    runSource('GSCPI', gscpi),
-    runSource('USAspending', usaspending),
-    runSource('Comtrade', comtrade),
+    { name: 'FRED', fn: fred, args: [process.env.FRED_API_KEY] },
+    { name: 'Treasury', fn: treasury, args: [] },
+    { name: 'BLS', fn: bls, args: [process.env.BLS_API_KEY] },
+    { name: 'EIA', fn: eia, args: [process.env.EIA_API_KEY] },
+    { name: 'GSCPI', fn: gscpi, args: [] },
+    { name: 'USAspending', fn: usaspending, args: [] },
+    { name: 'Comtrade', fn: comtrade, args: [] },
 
     // Tier 3: Weather, Environment, Technology, Social
-    runSource('NOAA', noaa),
-    runSource('EPA', epa),
-    runSource('Patents', patents),
-    runSource('Bluesky', bluesky),
-    runSource('Reddit', reddit),
-    runSource('Telegram', telegram),
-    runSource('KiwiSDR', kiwisdr),
+    { name: 'NOAA', fn: noaa, args: [] },
+    { name: 'EPA', fn: epa, args: [] },
+    { name: 'Patents', fn: patents, args: [] },
+    { name: 'Bluesky', fn: bluesky, args: [] },
+    { name: 'Reddit', fn: reddit, args: [] },
+    { name: 'Telegram', fn: telegram, args: [] },
+    { name: 'KiwiSDR', fn: kiwisdr, args: [] },
 
     // Tier 4: Space & Satellites
-    runSource('Space', space),
+    { name: 'Space', fn: space, args: [] },
 
     // Tier 5: Live Market Data
-    runSource('YFinance', yfinance),
+    { name: 'YFinance', fn: yfinance, args: [] },
 
     // Tier 6: Cyber & Infrastructure
-    runSource('CISA-KEV', cisaKev),
-    runSource('Cloudflare-Radar', cloudflareRadar),
+    { name: 'CISA-KEV', fn: cisaKev, args: [] },
+    { name: 'Cloudflare-Radar', fn: cloudflareRadar, args: [] },
   ];
+}
 
-  // Each runSource has its own 30s timeout, so allSettled will resolve
-  // within ~30s even if APIs hang. Global timeout is a safety net.
-  const results = await Promise.allSettled(allPromises);
-
-  const sources = results.map(r => r.status === 'fulfilled' ? r.value : { status: 'failed', error: r.reason?.message });
-  const totalMs = Date.now() - start;
-
-  const output = {
+/**
+ * Assemble raw results into the standard output shape.
+ * Shared between fullBriefing() and stepBriefing().
+ */
+function buildOutput(results, startedAt) {
+  const totalMs = Date.now() - startedAt;
+  return {
     crucix: {
       version: '2.0.0',
       timestamp: new Date().toISOString(),
       totalDurationMs: totalMs,
-      sourcesQueried: sources.length,
-      sourcesOk: sources.filter(s => s.status === 'ok').length,
-      sourcesFailed: sources.filter(s => s.status !== 'ok').length,
+      sourcesQueried: results.length,
+      sourcesOk: results.filter(s => s.status === 'ok').length,
+      sourcesFailed: results.filter(s => s.status !== 'ok').length,
     },
     sources: Object.fromEntries(
-      sources.filter(s => s.status === 'ok').map(s => [s.name, s.data])
+      results.filter(s => s.status === 'ok').map(s => [s.name, s.data])
     ),
-    errors: sources.filter(s => s.status !== 'ok').map(s => ({ name: s.name, error: s.error })),
+    errors: results.filter(s => s.status !== 'ok').map(s => ({ name: s.name, error: s.error })),
     timing: Object.fromEntries(
-      sources.map(s => [s.name, { status: s.status, ms: s.durationMs }])
+      results.map(s => [s.name, { status: s.status, ms: s.durationMs }])
     ),
   };
+}
 
-  console.error(`[Crucix] Sweep complete in ${totalMs}ms — ${output.crucix.sourcesOk}/${sources.length} sources returned data`);
+export async function fullBriefing() {
+  console.error('[Crucix] Starting intelligence sweep (parallel) — 29 sources...');
+  const start = Date.now();
+
+  const allPromises = getSourceTasks().map(t => runSource(t.name, t.fn, ...t.args));
+
+  // Each runSource has its own 30s timeout, so allSettled will resolve
+  // within ~30s even if APIs hang. Global timeout is a safety net.
+  const settled = await Promise.allSettled(allPromises);
+  const results = settled.map(r => r.status === 'fulfilled' ? r.value : { status: 'failed', error: r.reason?.message });
+
+  const output = buildOutput(results, start);
+  console.error(`[Crucix] Sweep complete in ${output.crucix.totalDurationMs}ms — ${output.crucix.sourcesOk}/${results.length} sources returned data`);
+  return output;
+}
+
+/**
+ * upd by lonk 2026-05-18
+ * Sequential sweep — processes sources one-by-one to minimise memory pressure.
+ * Suitable for low-memory environments such as Render.com (512 MB).
+ * Returns the same output shape as fullBriefing().
+ */
+export async function stepBriefing() {
+  console.error('[Crucix] Starting intelligence sweep (sequential) — 29 sources...');
+  const start = Date.now();
+  const results = [];
+
+  for (const task of getSourceTasks()) {
+    const result = await runSource(task.name, task.fn, ...task.args);
+    results.push(result);
+    const ok = result.status === 'ok' ? '✓' : '✗';
+    console.error(`  [${ok}] ${task.name} — ${result.durationMs}ms${result.error ? ` — ${result.error}` : ''}`);
+  }
+
+  const output = buildOutput(results, start);
+  console.error(`[Crucix] Sweep complete in ${output.crucix.totalDurationMs}ms — ${output.crucix.sourcesOk}/${results.length} sources returned data`);
   return output;
 }
 
@@ -146,6 +187,7 @@ export async function fullBriefing() {
 const entryHref = process.argv[1] ? pathToFileURL(process.argv[1]).href : null;
 
 if (entryHref && import.meta.url === entryHref) {
-  const data = await fullBriefing();
+  const useStep = process.argv.includes('--step');
+  const data = useStep ? await stepBriefing() : await fullBriefing();
   console.log(JSON.stringify(data, null, 2));
 }

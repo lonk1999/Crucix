@@ -4,7 +4,7 @@
 
 import { safeFetch } from '../utils/fetch.mjs';
 
-const EXPORTS_BASE = 'https://sanctionslistservice.ofac.treas.gov/api/PublicationPreview/exports';
+const EXPORTS_BASE = 'https://sanctionslistservice.ofac.treas.gov/api/download';
 
 // SDN list endpoints
 const SDN_XML_URL = `${EXPORTS_BASE}/SDN.XML`;

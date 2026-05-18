@@ -4,7 +4,6 @@
   "description": "Local intelligence engine - 27 OSINT sources, live dashboard, public demo at crucix.live, auto-refresh, optional LLM layer.",
   "type": "module",
   "scripts": {
-    "build": "node apis/save-briefing.mjs",
     "start": "node server.mjs",
     "dev": "node --trace-warnings server.mjs",
     "sweep": "node apis/briefing.mjs",
