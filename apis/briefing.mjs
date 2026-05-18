@@ -96,7 +96,7 @@ function getSourceTasks() {
   return [
     // Tier 1: Core OSINT & Geopolitical
     { name: 'GDELT', fn: gdelt, args: [] },
-    { name: 'OpenSky', fn: opensky, args: [] },
+    { name: 'OpenSky', fn: opensky, args: [process.env.OPEN_SKY_KEY, process.env.OPEN_SKY_ID] },
     { name: 'FIRMS', fn: firms, args: [] },
     { name: 'Maritime', fn: ships, args: [] },
     { name: 'Safecast', fn: safecast, args: [] },
@@ -200,6 +200,19 @@ export async function stepBriefing() {
   const errors = [];
   const timing = {};
 
+  // Dedicated OpenSky cache file — persists independently of runs/latest.json
+  const OPEN_SKY_CACHE = join(RUNS_DIR, 'memory', 'opensky_last_good.json');
+  let prevOpenSky = null;
+  try {
+    if (existsSync(OPEN_SKY_CACHE)) {
+      const cached = JSON.parse(readFileSync(OPEN_SKY_CACHE, 'utf-8'));
+      const hotspots = cached.hotspots || [];
+      if (hotspots.some(h => h.totalAircraft > 0)) {
+        prevOpenSky = cached;
+      }
+    }
+  } catch { /* ignore read errors */ }
+
   for (const task of tasks) {
     const result = await runSource(task.name, task.fn, ...task.args);
 
@@ -210,6 +223,14 @@ export async function stepBriefing() {
       const json = JSON.stringify(result.data);
       // Write to disk immediately — data leaves memory, GC can collect
       writeFileSync(join(TMP_DIR, `${task.name}.json`), json);
+
+      // Save latest good OpenSky snapshot to dedicated cache
+      if (task.name === 'OpenSky') {
+        const hotspots = result.data?.hotspots || [];
+        if (hotspots.some(h => h.totalAircraft > 0)) {
+          writeFileSync(OPEN_SKY_CACHE, json);
+        }
+      }
     } else {
       errors.push({ name: task.name, error: result.error });
     }
@@ -229,6 +250,22 @@ export async function stepBriefing() {
     if (existsSync(fpath)) {
       sources[task.name] = JSON.parse(readFileSync(fpath, 'utf-8'));
       rmSync(fpath); // Clean up immediately after reading
+    }
+  }
+
+  // OpenSky fallback: restore from dedicated cache when live data is empty
+  if (sources.OpenSky && prevOpenSky) {
+    const hotspots = sources.OpenSky.hotspots || [];
+    const hasLiveData = hotspots.some(h => h.totalAircraft > 0);
+    if (!hasLiveData) {
+      const prevTotal = prevOpenSky.hotspots?.reduce((s, h) => s + (h.totalAircraft || 0), 0) || 0;
+      sources.OpenSky = {
+        ...prevOpenSky,
+        _fallback: true,
+        _fallbackNote: `OpenSky unavailable at ${new Date().toISOString()}, using cached data from ${prevOpenSky.timestamp || 'previous sweep'}`,
+        _liveTimestamp: new Date().toISOString(),
+      };
+      console.error(`  [~] OpenSky unavailable — restored ${prevTotal} aircraft from cache (${OPEN_SKY_CACHE})`);
     }
   }
 

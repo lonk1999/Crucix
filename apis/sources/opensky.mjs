@@ -5,6 +5,72 @@
 import { safeFetch } from '../utils/fetch.mjs';
 
 const BASE = 'https://opensky-network.org/api';
+const AUTH_URL = 'https://auth.opensky-network.org/auth/realms/opensky-network/protocol/openid-connect/token';
+
+// OAuth2 token cache (client credentials flow)
+let authToken = null;
+let authExpiresAt = 0;
+
+/**
+ * Obtain or reuse an OAuth2 access token.
+ *
+ * Preferred (separate env vars):
+ *   getAuthToken(clientSecret, clientId)
+ *
+ * Legacy (single OPEN_SYS_KEY):
+ *   - JSON:   {"clientId":"...","clientSecret":"..."}  or {"client_id":"...","client_secret":"..."}
+ *   - plain:  client_id:client_secret
+ *   - raw:    treated as Bearer token directly
+ *
+ * Falls back to anonymous when auth fails.
+ */
+async function getAuthToken(apiKey, clientId) {
+  if (authToken && Date.now() < authExpiresAt) return authToken;
+
+  let clientSecret = apiKey;
+
+  // OPEN_SKY_ID + OPEN_SKY_KEY split mode (OPEN_SKY_ID passed as clientId arg)
+  if (clientId) {
+    // clientId is already set, use apiKey as clientSecret — skip parsing
+  } else try {
+    const parsed = JSON.parse(apiKey);
+    clientId = parsed.clientId || parsed.client_id;
+    clientSecret = parsed.clientSecret || parsed.client_secret;
+  } catch {
+    const colonIdx = apiKey.indexOf(':');
+    if (colonIdx > 0) {
+      clientId = apiKey.substring(0, colonIdx);
+      clientSecret = apiKey.substring(colonIdx + 1);
+    } else {
+      // Treat as raw token (e.g. developer API key)
+      authToken = apiKey;
+      authExpiresAt = Infinity;
+      return authToken;
+    }
+  }
+
+  try {
+    const resp = await fetch(AUTH_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: new URLSearchParams({
+        grant_type: 'client_credentials',
+        client_id: clientId,
+        client_secret: clientSecret,
+      }),
+      signal: AbortSignal.timeout(10000),
+    });
+    if (!resp.ok) throw new Error(`HTTP ${resp.status} ${resp.statusText}`);
+    const data = await resp.json();
+    authToken = data.access_token;
+    authExpiresAt = Date.now() + (data.expires_in - 60) * 1000; // 60s safety buffer
+    return authToken;
+  } catch (e) {
+    console.error(`[OpenSky] OAuth2 token refresh failed: ${e.message}`);
+    // Return cached token if still valid, otherwise null → anonymous fallback
+    return (authToken && Date.now() < authExpiresAt) ? authToken : null;
+  }
+}
 
 // Get all current flights (global state vector)
 export async function getAllFlights() {
@@ -12,14 +78,15 @@ export async function getAllFlights() {
 }
 
 // Get flights in a bounding box (lat/lon)
-export async function getFlightsInArea(lamin, lomin, lamax, lomax) {
+export async function getFlightsInArea(lamin, lomin, lamax, lomax, authToken) {
   const params = new URLSearchParams({
     lamin: String(lamin),
     lomin: String(lomin),
     lamax: String(lamax),
     lomax: String(lomax),
   });
-  return safeFetch(`${BASE}/states/all?${params}`, { timeout: 20000 });
+  const headers = authToken ? { 'Authorization': `Bearer ${authToken}` } : {};
+  return safeFetch(`${BASE}/states/all?${params}`, { timeout: 20000, headers });
 }
 
 // Get flights by specific aircraft (ICAO24 hex codes)
@@ -64,11 +131,22 @@ const HOTSPOTS = {
 };
 
 // Briefing — check hotspot regions for flight activity
-export async function briefing() {
+export async function briefing(apiKey, clientId) {
+  // Obtain auth token if credentials provided; null → anonymous fallback
+  const token = (apiKey && clientId) ? await getAuthToken(apiKey, clientId)
+               : apiKey ? await getAuthToken(apiKey)
+               : null;
+  if (token) {
+    const mode = clientId ? 'OPEN_SKY_ID + OPEN_SKY_KEY'
+               : token === apiKey ? 'raw token'
+               : 'OAuth2 client (single key)';
+    console.log(`[OpenSky] Authenticated (${mode})`);
+  }
+
   const hotspotEntries = Object.entries(HOTSPOTS);
   const results = await Promise.all(
     hotspotEntries.map(async ([key, box]) => {
-      const data = await getFlightsInArea(box.lamin, box.lomin, box.lamax, box.lomax);
+      const data = await getFlightsInArea(box.lamin, box.lomin, box.lamax, box.lomax, token);
       const error = data?.error || null;
       const states = data?.states || [];
       return {
@@ -107,6 +185,6 @@ export async function briefing() {
 }
 
 if (process.argv[1]?.endsWith('opensky.mjs')) {
-  const data = await briefing();
+  const data = await briefing(process.env.OPEN_SKY_KEY, process.env.OPEN_SKY_ID);
   console.log(JSON.stringify(data, null, 2));
 }
