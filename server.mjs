@@ -325,9 +325,7 @@ async function runSweepCycle() {
 
   try {
     // 1. Run the step briefing sweep (sequential — lower memory)
-    // 改为队列方式 upd by lonk 2026-05-18
-    // const rawData = await fullBriefing();
-    const rawData = await stepBriefing();
+    let rawData = await stepBriefing();
 
     // 2. Save to runs/latest.json
     writeFileSync(join(RUNS_DIR, 'latest.json'), JSON.stringify(rawData, null, 2));
@@ -336,6 +334,8 @@ async function runSweepCycle() {
     // 3. Synthesize into dashboard format
     console.log('[Crucix] Synthesizing dashboard data...');
     const synthesized = await synthesize(rawData);
+    // rawData no longer needed after synthesize — free for GC immediately
+    rawData = null;
 
     // 4. Delta computation + memory
     const delta = memory.addRun(synthesized);

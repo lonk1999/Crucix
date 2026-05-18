@@ -4,7 +4,16 @@
 // Outputs structured JSON for Claude to synthesize into actionable briefing
 
 import './utils/env.mjs'; // Load API keys from .env
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { readFileSync, writeFileSync, mkdirSync, rmSync, existsSync, readdirSync } from 'node:fs';
+import { join, dirname } from 'node:path';
+
+// Project paths for incremental disk writes (stepBriefing)
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const PROJECT_ROOT = join(__dirname, '..');
+const RUNS_DIR = join(PROJECT_ROOT, 'runs');
+const TMP_DIR = join(RUNS_DIR, '_step');
 
 // === Tier 1: Core OSINT & Geopolitical ===
 import { briefing as gdelt } from './sources/gdelt.mjs';
@@ -69,6 +78,15 @@ export async function runSource(name, fn, ...args) {
 }
 
 /**
+ * Format byte count to human-readable string (e.g. "1.2 KB", "28.3 MB").
+ */
+function formatBytes(bytes) {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+}
+
+/**
  * Source task definitions shared between parallel (fullBriefing) and
  * sequential (stepBriefing) execution modes.
  * Each entry: { name, fn, args } where fn is the briefing function
@@ -85,7 +103,7 @@ function getSourceTasks() {
     { name: 'ACLED', fn: acled, args: [] },
     { name: 'ReliefWeb', fn: reliefweb, args: [] },
     { name: 'WHO', fn: who, args: [] },
-    { name: 'OFAC', fn: ofac, args: [] },
+    // { name: 'OFAC', fn: ofac, args: [] }, // 禁用 — XML 数据量过大 拉取导致内存超限
     { name: 'OpenSanctions', fn: opensanctions, args: [] },
     { name: 'ADS-B', fn: adsb, args: [] },
 
@@ -163,23 +181,72 @@ export async function fullBriefing() {
 /**
  * upd by lonk 2026-05-18
  * Sequential sweep — processes sources one-by-one to minimise memory pressure.
+ * Each source result is written to disk immediately after fetch, then freed.
+ * Final output is assembled from tmp files at the very end (brief peak memory).
  * Suitable for low-memory environments such as Render.com (512 MB).
  * Returns the same output shape as fullBriefing().
  */
 export async function stepBriefing() {
-  console.error('[Crucix] Starting intelligence sweep (sequential) — 29 sources...');
+  console.error('[Crucix] Starting intelligence sweep (sequential) — 28 sources...');
   const start = Date.now();
-  const results = [];
 
-  for (const task of getSourceTasks()) {
+  // Prepare tmp directory for incremental writes
+  if (!existsSync(TMP_DIR)) mkdirSync(TMP_DIR, { recursive: true });
+  for (const f of readdirSync(TMP_DIR)) {
+    rmSync(join(TMP_DIR, f), { force: true });
+  }
+
+  const tasks = getSourceTasks();
+  const errors = [];
+  const timing = {};
+
+  for (const task of tasks) {
     const result = await runSource(task.name, task.fn, ...task.args);
-    results.push(result);
+
+    timing[task.name] = { status: result.status, ms: result.durationMs };
+
+    let sizeStr = '';
+    if (result.status === 'ok') {
+      const json = JSON.stringify(result.data);
+      // Write to disk immediately — data leaves memory, GC can collect
+      writeFileSync(join(TMP_DIR, `${task.name}.json`), json);
+    } else {
+      errors.push({ name: task.name, error: result.error });
+    }
+
     const ok = result.status === 'ok' ? '✓' : '✗';
     console.error(`  [${ok}] ${task.name} — ${result.durationMs}ms${result.error ? ` — ${result.error}` : ''}`);
   }
 
-  const output = buildOutput(results, start);
-  console.error(`[Crucix] Sweep complete in ${output.crucix.totalDurationMs}ms — ${output.crucix.sourcesOk}/${results.length} sources returned data`);
+  // Assemble final output from tmp files — peak memory here, but brief
+  const totalMs = Date.now() - start;
+  const sourcesQueried = tasks.length;
+  const sourcesOk = Object.values(timing).filter(t => t.status === 'ok').length;
+
+  const sources = {};
+  for (const task of tasks) {
+    const fpath = join(TMP_DIR, `${task.name}.json`);
+    if (existsSync(fpath)) {
+      sources[task.name] = JSON.parse(readFileSync(fpath, 'utf-8'));
+      rmSync(fpath); // Clean up immediately after reading
+    }
+  }
+
+  const output = {
+    crucix: {
+      version: '2.0.0',
+      timestamp: new Date().toISOString(),
+      totalDurationMs: totalMs,
+      sourcesQueried,
+      sourcesOk,
+      sourcesFailed: sourcesQueried - sourcesOk,
+    },
+    sources,
+    errors,
+    timing,
+  };
+
+  console.error(`[Crucix] Sweep complete in ${output.crucix.totalDurationMs}ms — ${sourcesOk}/${sourcesQueried} sources returned data`);
   return output;
 }
 
