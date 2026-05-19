@@ -155,9 +155,10 @@ html,body{height:100%;background:var(--bg);color:var(--text);font-family:var(--s
 .news-icon:hover{fill:rgba(129,212,250,1)}
 
 /* LOWER GRID — flex layout for responsive panel sizing */
-.lower{display:flex;flex-wrap:wrap;gap:10px;margin-top:10px;align-items:flex-start}
+.lower{display:flex;flex-wrap:wrap;gap:10px;margin-top:0px;align-items:flex-start}
 .lower .g-panel{min-width:0;box-sizing:border-box}
 .lower .lp-ticker{flex:1.2 1 240px;max-width:380px}
+.lower .lp-ticker .ticker-wrap{flex:1;min-height:0;max-height:none}
 .right-delta .delta-list{max-height:200px}
 .lower .lp-macro{flex:2.5 1 360px}
 .lower .lp-ideas{flex:1.5 1 300px}
