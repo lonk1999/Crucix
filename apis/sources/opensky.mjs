@@ -140,7 +140,7 @@ export async function briefing(apiKey, clientId) {
     const mode = clientId ? 'OPEN_SKY_ID + OPEN_SKY_KEY'
                : token === apiKey ? 'raw token'
                : 'OAuth2 client (single key)';
-    console.log(`[OpenSky] Authenticated (${mode})`);
+    // console.log(`[OpenSky] Authenticated (${mode})`);
   }
 
   const hotspotEntries = Object.entries(HOTSPOTS);
