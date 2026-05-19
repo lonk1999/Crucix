@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CRUCIX — Intelligence Terminal</title>
+<link rel="icon" type="image/png" sizes="32x32" href="/favicon.png">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@300;400;500;600;700&family=Space+Grotesk:wght@300;400;500;600;700&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/gsap/3.12.5/gsap.min.js"></script>
@@ -1485,7 +1486,13 @@ function renderLower(){
       ${ideasHtml}
       <div class="disclosure">FOR INFORMATIONAL PURPOSES ONLY. This is not financial advice, a recommendation to buy or sell any security, or a solicitation of any kind. All signal-based observations are derived from publicly available OSINT data and should not be relied upon for investment decisions. Consult a licensed financial advisor before making any investment. Past performance does not guarantee future results.</div>
     </div>`;
-  document.getElementById('lowerGrid').innerHTML=`${tickerPanel}${osintPanel}${macroPanel}${ideasPanel}`;
+  const lg=document.getElementById('lowerGrid');
+  lg.innerHTML=`${tickerPanel}${osintPanel}${macroPanel}${ideasPanel}`;
+  // Equalize news ticker height to macro panel height
+  requestAnimationFrame(()=>{
+    const m=lg.querySelector('.lp-macro'),t=lg.querySelector('.lp-ticker');
+    if(m&&t&&!isMobileLayout())t.style.height=m.offsetHeight+'px';
+  });
 }
 
 // === RIGHT RAIL ===

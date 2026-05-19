@@ -163,7 +163,7 @@ function buildOutput(results, startedAt) {
 }
 
 export async function fullBriefing() {
-  console.error('[Crucix] Starting intelligence sweep (parallel) — 29 sources...');
+  console.error('[Crucix] Starting intelligence sweep (parallel) — 28 sources...');
   const start = Date.now();
 
   const allPromises = getSourceTasks().map(t => runSource(t.name, t.fn, ...t.args));
