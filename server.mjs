@@ -28,6 +28,17 @@ for (const dir of [RUNS_DIR, MEMORY_DIR, join(MEMORY_DIR, 'cold')]) {
   if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 }
 
+// LLM ideas backup — persist last good set for fallback when LLM returns empty
+const IDEAS_BACKUP_PATH = join(MEMORY_DIR, 'ideas_backup.json');
+
+function loadIdeasBackup() {
+  try {
+    const raw = readFileSync(IDEAS_BACKUP_PATH, 'utf8');
+    const ideas = JSON.parse(raw);
+    return Array.isArray(ideas) && ideas.length > 0 ? ideas : null;
+  } catch { return null; }
+}
+
 // === State ===
 let currentData = null;    // Current synthesized dashboard data
 let lastSweepTime = null;  // Timestamp of last sweep
@@ -341,24 +352,42 @@ async function runSweepCycle() {
     const delta = memory.addRun(synthesized);
     synthesized.delta = delta;
 
-    // 5. LLM-powered trade ideas (LLM-only feature) — isolated so failures don't kill sweep
+    // 5. LLM-powered trade ideas — isolated so failures don't kill sweep
     if (llmProvider?.isConfigured) {
       try {
         console.log('[Crucix] Generating LLM trade ideas...');
         const previousIdeas = memory.getLastRun()?.ideas || [];
         const llmIdeas = await generateLLMIdeas(llmProvider, synthesized, delta, previousIdeas);
-        if (llmIdeas) {
+        if (llmIdeas && llmIdeas.length > 0) {
           synthesized.ideas = llmIdeas;
           synthesized.ideasSource = 'llm';
+          // Persist as backup for next sweep in case LLM fails
+          try { writeFileSync(IDEAS_BACKUP_PATH, JSON.stringify(llmIdeas)); } catch {}
           console.log(`[Crucix] LLM generated ${llmIdeas.length} ideas`);
+        } else {
+          // LLM returned empty — fall back to previous good ideas
+          const backup = loadIdeasBackup();
+          if (backup) {
+            synthesized.ideas = backup;
+            synthesized.ideasSource = 'llm-backup';
+            console.log(`[Crucix] LLM returned 0 ideas — using ${backup.length} backup ideas`);
+          } else {
+            synthesized.ideas = [];
+            synthesized.ideasSource = 'llm-failed';
+          }
+        }
+      } catch (llmErr) {
+        console.error('[Crucix] LLM ideas failed (non-fatal):', llmErr.message);
+        // LLM threw — fall back to backup
+        const backup = loadIdeasBackup();
+        if (backup) {
+          synthesized.ideas = backup;
+          synthesized.ideasSource = 'llm-backup';
+          console.log(`[Crucix] LLM ideas failed — using ${backup.length} backup ideas`);
         } else {
           synthesized.ideas = [];
           synthesized.ideasSource = 'llm-failed';
         }
-      } catch (llmErr) {
-        console.error('[Crucix] LLM ideas failed (non-fatal):', llmErr.message);
-        synthesized.ideas = [];
-        synthesized.ideasSource = 'llm-failed';
       }
     } else {
       synthesized.ideas = [];
