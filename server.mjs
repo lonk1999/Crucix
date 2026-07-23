@@ -9,8 +9,8 @@ import { fileURLToPath } from 'url';
 import { exec } from 'child_process';
 import config from './crucix.config.mjs';
 import { getLocale, currentLanguage, getSupportedLocales } from './lib/i18n.mjs';
-// 导入队列方式 upd by lonk 2026-05-18
-import { stepBriefing } from './apis/briefing.mjs';
+// 导入并行方式 (upd by lonk 2026-05-18, reverted to parallel)
+import { fullBriefing } from './apis/briefing.mjs';
 import { synthesize, generateIdeas } from './dashboard/inject.mjs';
 import { MemoryManager } from './lib/delta/index.mjs';
 import { createLLMProvider } from './lib/llm/index.mjs';
@@ -335,8 +335,8 @@ async function runSweepCycle() {
   console.log(`${'='.repeat(60)}`);
 
   try {
-    // 1. Run the step briefing sweep (sequential — lower memory)
-    let rawData = await stepBriefing();
+    // 1. Run the full briefing sweep (parallel — all sources simultaneously)
+    let rawData = await fullBriefing();
 
     // 2. Save to runs/latest.json
     writeFileSync(join(RUNS_DIR, 'latest.json'), JSON.stringify(rawData, null, 2));

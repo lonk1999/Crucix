@@ -3,6 +3,7 @@ node_modules/
 
 # Environment (contains API keys)
 .env
+备忘.txt
 apis/.env
 
 # Runtime data
